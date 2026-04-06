@@ -88,9 +88,10 @@ tell application "Numbers"
 					set amountText to (character id 163) & (amountNum as text)
 
 					set infoText to "Item: " & budgetItem & "
+					
 Category: " & category & "
 Interval: " & paymentInterval & "
-First Payment: " & firstPaymentText & "
+Payment Date: " & firstPaymentText & "
 
 Enter the amount to budget this month:"
 
