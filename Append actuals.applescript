@@ -128,7 +128,6 @@ repeat with k from (headerIndex + 1) to (count of csvLines)
 								set value of cell 3 to parsedAmount
 								tell cell 3 to set format to currency
 								set value of cell 4 to theComment
-								set value of cell 5 to ((month of parsedDate as string) & " " & (year of parsedDate as string))
 							end tell
 						on error errMsg number errNum
 							display alert "Numbers got an error: ensure Actuals table is not organised by Category while using this script" buttons {"OK"} as warning

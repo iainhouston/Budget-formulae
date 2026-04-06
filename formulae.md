@@ -152,7 +152,7 @@ total. Sourced from the more complex LET formula developed in session.
 )
 ```
 
-———-
+-----
 
 # Monthly Budget table
 
@@ -160,9 +160,9 @@ An AppleScript is used each month to derive the **Monthly Budget** table from th
 
 
 |Column|Content                                                                                                        |
-|——|—————————————————————————————————————|
-|A     |Budget Month (Month Year in text format)                                                                       |                                                                                                       
-|B     |Budget item                                                                                                    |                                                                                                 
+|------|---------------------------------------------------------------------------------------------------------------|
+|A     |Budget Month (Month Year in text format)                                                                       |
+|B     |Budget item                                                                                                    |
 |C     |Category                                                                                                       |
 |D     |Payment interval                                                                                               |
 |E     |Budgeted amount                                                                                                |
@@ -176,12 +176,11 @@ Formulas reference the **Actuals** table to calculate expenditure per month and 
 
 
 |Column|Content                                                                                                        |
-|——|—————————————————————————————————————|
+|------|---------------------------------------------------------------------------------------------------------------|
 |A     |Date                                                                                                           |
 |B     |Category                                                                                                       |
 |C     |Amount                                                                                                         |
 |D     |Comment (text)                                                                                                 |
-|E     |Summary Month (Month Year text)                                                                                |
 
 ### 7. Five most recent months’ expenditure
 
@@ -189,26 +188,97 @@ A matrix showing expenditure summaries per month for the most recent 5 months. T
 
 
 ```
-=LET(   months,       TRANSPOSE(TAKE(UNIQUE(Summary Month,unique-by,occurrence), −5,number-of-columns)),   categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,if-empty),unique-by,occurrence),sort-index,sort-order,sort-by),   body,         MAKEARRAY(                   ROWS(categories,headers),                   COLUMNS(months,headers),                   LAMBDA(r, c,                     SUMIFS(                       Amount,                       Actuals::Category,      INDEX(categories, r, 1,area-index),                       Summary Month,          INDEX(months, 1, c,area-index)                     )                   )                 ),   totals,       BYCOL(body, LAMBDA(col, SUM(col))),   afford_check, Expenditure affordability::B$7 − totals,   VSTACK(     HSTACK(“”,                    months),     HSTACK(categories,            body),     HSTACK(“Total”,               totals),     HSTACK(“Affordability check”, afford_check)   ) )
+=LET(
+  monthKeys,    TAKE(SORT(UNIQUE(DATE(YEAR(Actuals::A), MONTH(Actuals::A), 1), unique-by, occurrence)), −5),
+  months,       TRANSPOSE(TEXT(monthKeys, “MMMM YYYY”)),
+  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0, if-empty), unique-by, occurrence), sort-index, sort-order, sort-by),
+  body,         MAKEARRAY(
+                  ROWS(categories, headers),
+                  COLUMNS(months, headers),
+                  LAMBDA(r, c,
+                    SUMIFS(
+                      Amount,
+                      YEAR(Actuals::A),   YEAR(INDEX(monthKeys, c, 1, area-index)),
+                      MONTH(Actuals::A),  MONTH(INDEX(monthKeys, c, 1, area-index)),
+                      Actuals::Category,  INDEX(categories, r, 1, area-index)
+                    )
+                  )
+                ),
+  totals,       BYCOL(body, LAMBDA(col, SUM(col))),
+  afford_check, Expenditure affordability::B$7 − totals,
+  VSTACK(
+    HSTACK(“”,                    months),
+    HSTACK(categories,            body),
+    HSTACK(“Total”,               totals),
+    HSTACK(“Affordability check”, afford_check)
+  )
+)
 ```
 
 
-———-
+-----
 
 ### 8. Five most recent monthly budgets
 
 A matrix showing budget summaries per month for the most recent 5 months. This data is required to show variance between expenditure and budget amounts.
 
 ```
-=LET(   months,       TRANSPOSE(TAKE(UNIQUE(Budget Month,unique-by,occurrence), −5,number-of-columns)),   categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,if-empty),unique-by,occurrence),sort-index,sort-order,sort-by),   body,         MAKEARRAY(                   ROWS(categories,headers),                   COLUMNS(months,headers),                   LAMBDA(r, c,                     SUMIFS(                       Monthly Budget::Budgeted amount,                       Monthly Budget::Category,     INDEX(categories, r, 1,area-index),                       Budget Month, INDEX(months, 1, c,area-index)                     )                   )                 ),   totals,       BYCOL(body, LAMBDA(col, SUM(col))),   afford_check, Expenditure affordability::B$7 − totals,   VSTACK(     HSTACK(“”,                    months),     HSTACK(categories,            body),     HSTACK(“Total”,               totals),     HSTACK(“Affordability check”, afford_check)   ) )
+=LET(
+  months,       TRANSPOSE(TAKE(UNIQUE(Budget Month, unique-by, occurrence), −5, number-of-columns)),
+  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0, if-empty), unique-by, occurrence), sort-index, sort-order, sort-by),
+  body,         MAKEARRAY(
+                  ROWS(categories, headers),
+                  COLUMNS(months, headers),
+                  LAMBDA(r, c,
+                    SUMIFS(
+                      Monthly Budget::Budgeted amount,
+                      Monthly Budget::Category,  INDEX(categories, r, 1, area-index),
+                      Budget Month,              INDEX(months, 1, c, area-index)
+                    )
+                  )
+                ),
+  totals,       BYCOL(body, LAMBDA(col, SUM(col))),
+  afford_check, Expenditure affordability::B$7 − totals,
+  VSTACK(
+    HSTACK(“”,                    months),
+    HSTACK(categories,            body),
+    HSTACK(“Total”,               totals),
+    HSTACK(“Affordability check”, afford_check)
+  )
+)
 ```
 
-———-
+-----
 
 ### 9. Current month’s Variance to date
 
 
 
 ```
-LET(   month,      This Month::$B$1,   categories, SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,if-empty),unique-by,occurrence),sort-index,sort-order,sort-by),    budgeted,   MAP(categories, LAMBDA(cat,                 SUMIFS(                   Monthly Budget::Budgeted amount,                   Monthly Budget::Category,     cat,                   Budget Month, month                 )               )),    actual,     MAP(categories, LAMBDA(cat,                 SUMIFS(                   Amount,                   Actuals::Category,      cat,                   Summary Month, month                 )               )),    variance,   budgeted − actual,    VSTACK(     HSTACK(month,       “Budgeted”, “Actual”, “Variance”),     HSTACK(categories,  budgeted,   actual,   variance),     HSTACK(“Total”,     SUM(budgeted), SUM(actual), SUM(budgeted) − SUM(actual))   ) ) 
+=LET(
+  month,      This Month::$B$1,
+  monthDate,  DATEVALUE(“1 “ & month),
+  categories, SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0, if-empty), unique-by, occurrence), sort-index, sort-order, sort-by),
+  budgeted,   MAP(categories, LAMBDA(cat,
+                SUMIFS(
+                  Monthly Budget::Budgeted amount,
+                  Monthly Budget::Category,  cat,
+                  Budget Month,              month
+                )
+              )),
+  actual,     MAP(categories, LAMBDA(cat,
+                SUMIFS(
+                  Amount,
+                  YEAR(Actuals::A),   YEAR(monthDate),
+                  MONTH(Actuals::A),  MONTH(monthDate),
+                  Actuals::Category,  cat
+                )
+              )),
+  variance,   budgeted − actual,
+  VSTACK(
+    HSTACK(month,       “Budgeted”,    “Actual”,    “Variance”),
+    HSTACK(categories,  budgeted,      actual,      variance),
+    HSTACK(“Total”,     SUM(budgeted), SUM(actual), SUM(budgeted) − SUM(actual))
+  )
+)
 ```
