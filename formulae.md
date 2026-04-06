@@ -189,18 +189,17 @@ A matrix showing expenditure summaries per month for the most recent 5 months. T
 
 ```
 =LET(
-  monthKeys,    TAKE(SORT(UNIQUE(DATE(YEAR(Actuals::A), MONTH(Actuals::A), 1), unique-by, occurrence)), −5),
-  months,       TRANSPOSE(TEXT(monthKeys, “MMMM YYYY”)),
-  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0, if-empty), unique-by, occurrence), sort-index, sort-order, sort-by),
+  monthKeys,    TAKE(SORT(UNIQUE(DATE(YEAR(Actuals::A), MONTH(Actuals::A), 1),,),,,), −5,),
+  months,       TRANSPOSE(MAP(monthKeys, LAMBDA(d, CHOOSE(MONTH(d), “January”,”February”,”March”,”April”,”May”,”June”,”July”,”August”,”September”,”October”,”November”,”December”) & “ “ & YEAR(d)))),
+  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,),,),,,),
   body,         MAKEARRAY(
-                  ROWS(categories, headers),
-                  COLUMNS(months, headers),
+                  ROWS(categories,),
+                  COLUMNS(months,),
                   LAMBDA(r, c,
-                    SUMIFS(
-                      Amount,
-                      YEAR(Actuals::A),   YEAR(INDEX(monthKeys, c, 1, area-index)),
-                      MONTH(Actuals::A),  MONTH(INDEX(monthKeys, c, 1, area-index)),
-                      Actuals::Category,  INDEX(categories, r, 1, area-index)
+                    SUMPRODUCT(
+                      (DATE(YEAR(Actuals::A), MONTH(Actuals::A), 1) = INDEX(monthKeys, c, 1,)) *
+                      (Actuals::Category = INDEX(categories, r, 1,)) *
+                      Amount
                     )
                   )
                 ),
@@ -224,16 +223,16 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
 
 ```
 =LET(
-  months,       TRANSPOSE(TAKE(UNIQUE(Budget Month, unique-by, occurrence), −5, number-of-columns)),
-  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0, if-empty), unique-by, occurrence), sort-index, sort-order, sort-by),
+  months,       TRANSPOSE(TAKE(UNIQUE(Budget Month,,), −5,)),
+  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,),,),,,),
   body,         MAKEARRAY(
-                  ROWS(categories, headers),
-                  COLUMNS(months, headers),
+                  ROWS(categories,),
+                  COLUMNS(months,),
                   LAMBDA(r, c,
                     SUMIFS(
                       Monthly Budget::Budgeted amount,
-                      Monthly Budget::Category,  INDEX(categories, r, 1, area-index),
-                      Budget Month,              INDEX(months, 1, c, area-index)
+                      Monthly Budget::Category,  INDEX(categories, r, 1,),
+                      Budget Month,              INDEX(months, 1, c,)
                     )
                   )
                 ),
@@ -257,8 +256,9 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
 ```
 =LET(
   month,      This Month::$B$1,
-  monthDate,  DATEVALUE(“1 “ & month),
-  categories, SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0, if-empty), unique-by, occurrence), sort-index, sort-order, sort-by),
+  monthNum,   MATCH(LEFT(month, FIND(“ “, month) − 1), {“January”,”February”,”March”,”April”,”May”,”June”,”July”,”August”,”September”,”October”,”November”,”December”}, 0),
+  monthYear,  VALUE(RIGHT(month, 4)),
+  categories, SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,),,),,,),
   budgeted,   MAP(categories, LAMBDA(cat,
                 SUMIFS(
                   Monthly Budget::Budgeted amount,
@@ -267,11 +267,11 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
                 )
               )),
   actual,     MAP(categories, LAMBDA(cat,
-                SUMIFS(
-                  Amount,
-                  YEAR(Actuals::A),   YEAR(monthDate),
-                  MONTH(Actuals::A),  MONTH(monthDate),
-                  Actuals::Category,  cat
+                SUMPRODUCT(
+                  (YEAR(Actuals::A) = monthYear) *
+                  (MONTH(Actuals::A) = monthNum) *
+                  (Actuals::Category = cat) *
+                  Amount
                 )
               )),
   variance,   budgeted − actual,
