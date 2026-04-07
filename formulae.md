@@ -165,8 +165,7 @@ An AppleScript is used each month to derive the **Monthly Budget** table from th
 |B     |Budget item                                                                                                    |
 |C     |Category                                                                                                       |
 |D     |Payment interval                                                                                               |
-|E     |Budgeted amount                                                                                                |
-|F     |First payment (date format)                                                                                    |
+|E     |Budgeted this month                                                                                   
 
 # Actual expenditure items
 
