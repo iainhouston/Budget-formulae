@@ -229,7 +229,7 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
                   COLUMNS(months,),
                   LAMBDA(r, c,
                     SUMIFS(
-                      Monthly Budget::Budgeted amount,
+                      Monthly Budget::Budgeted this month,
                       Monthly Budget::Category,  INDEX(categories, r, 1,),
                       Budget Month,              INDEX(months, 1, c,)
                     )
@@ -260,7 +260,7 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
   categories, SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,),,),,,),
   budgeted,   MAP(categories, LAMBDA(cat,
                 SUMIFS(
-                  Monthly Budget::Budgeted amount,
+                  Monthly Budget::Budgeted this month,
                   Monthly Budget::Category,  cat,
                   Budget Month,              month
                 )
