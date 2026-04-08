@@ -32,10 +32,10 @@ repeat with k from (headerIndex + 1) to (count of csvLines)
 			set rawDesc to stripQuotes(item (descIdx of cols) of parts)
 			set defaultComment to (commentPrefix of cols) & titleCase(rawDesc)
 
-			set result to promptForTransaction(dVal, pOutNum, defaultComment)
-			if action of result is "cancel" then return
-			if action of result is "continue" then
-				set theComment to theComment of result
+			set txnResult to promptForTransaction(dVal, pOutNum, defaultComment)
+			if action of txnResult is "cancel" then return
+			if action of txnResult is "continue" then
+				set theComment to theComment of txnResult
 				set theCategory to selectCategory(dVal)
 				appendRowToNumbers(date dVal, theCategory, pOutNum, theComment)
 			end if
