@@ -190,7 +190,7 @@ A matrix showing expenditure summaries per month for the most recent 5 months. T
 =LET(
   monthKeys,    TAKE(SORT(UNIQUE(DATE(YEAR(Actuals::A), MONTH(Actuals::A), 1),,),,,), −5,),
   months,       TRANSPOSE(MAP(monthKeys, LAMBDA(d, CHOOSE(MONTH(d), “January”,”February”,”March”,”April”,”May”,”June”,”July”,”August”,”September”,”October”,”November”,”December”) & “ “ & YEAR(d)))),
-  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,),,),,,),
+  categories,   SORT(UNIQUE(FILTER('Spending template'::B, LEN('Spending template'::B) > 0,),,),,,),
   body,         MAKEARRAY(
                   ROWS(categories,),
                   COLUMNS(months,),
@@ -202,8 +202,8 @@ A matrix showing expenditure summaries per month for the most recent 5 months. T
                     )
                   )
                 ),
-  totals,       BYCOL(body, LAMBDA(col, SUM(col))),
-  afford_check, Expenditure affordability::B$7 − totals,
+  totals,       MAP(SEQUENCE(1, COLUMNS(months)), LAMBDA(c, SUM(INDEX(body, 0, c)))),
+  afford_check, Expenditure frequency::B$7 − totals,
   VSTACK(
     HSTACK(“”,                    months),
     HSTACK(categories,            body),
@@ -223,7 +223,7 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
 ```
 =LET(
   months,       TRANSPOSE(TAKE(UNIQUE(Budget Month,,), −5,)),
-  categories,   SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,),,),,,),
+  categories,   SORT(UNIQUE(FILTER('Spending template'::B, LEN('Spending template'::B) > 0,),,),,,),
   body,         MAKEARRAY(
                   ROWS(categories,),
                   COLUMNS(months,),
@@ -235,8 +235,8 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
                     )
                   )
                 ),
-  totals,       BYCOL(body, LAMBDA(col, SUM(col))),
-  afford_check, Expenditure affordability::B$7 − totals,
+  totals,       MAP(SEQUENCE(1, COLUMNS(months)), LAMBDA(c, SUM(INDEX(body, 0, c)))),
+  afford_check, Expenditure frequency::B$7 − totals,
   VSTACK(
     HSTACK(“”,                    months),
     HSTACK(categories,            body),
@@ -257,7 +257,7 @@ A matrix showing budget summaries per month for the most recent 5 months. This d
   month,      This Month::$B$1,
   monthNum,   MATCH(LEFT(month, FIND(“ “, month) − 1), {“January”,”February”,”March”,”April”,”May”,”June”,”July”,”August”,”September”,”October”,”November”,”December”}, 0),
   monthYear,  VALUE(RIGHT(month, 4)),
-  categories, SORT(UNIQUE(FILTER(Monthly Budget::Category, LEN(Monthly Budget::Category) > 0,),,),,,),
+  categories, SORT(UNIQUE(FILTER('Spending template'::B, LEN('Spending template'::B) > 0,),,),,,),
   budgeted,   MAP(categories, LAMBDA(cat,
                 SUMIFS(
                   Monthly Budget::Budgeted this month,
