@@ -3,145 +3,149 @@ use AppleScript version "2.4" -- Yosemite or later
 
 -- Append Paid out Transactions from CSV to Numbers Actuals Table
 
--- Prompt user to select the source CSV file
 set csvFile to choose file with prompt "Select the Downloaded Actuals CSV file:"
-
--- Read CSV content and split into lines
-set csvContent to do shell script "cat " & quoted form of POSIX path of csvFile
-set csvLines to paragraphs of csvContent
-
--- Determine account type based on first line
-set firstLine to item 1 of csvLines
-set isCC to false
-if firstLine contains "Select Credit Card" then set isCC to true
-
--- Find the header row containing required columns
-set headerIndex to 0
-repeat with i from 1 to (count of csvLines)
-	set csvLine to item i of csvLines
-	if csvLine contains "\"Date\"" and csvLine contains "\"Paid out\"" and csvLine contains "\"Paid in\"" then
-		set headerIndex to i
-		exit repeat
-	end if
-end repeat
-
+set {csvLines, isCC} to loadCSV(csvFile)
+set headerIndex to findHeader(csvLines)
 if headerIndex = 0 then
 	display alert "Could not locate the CSV header row containing required columns." buttons {"OK"}
 	return
 end if
-
--- Determine column indices from header
-set oldDelims to AppleScript's text item delimiters
-set AppleScript's text item delimiters to ","
-set headerItems to text items of item headerIndex of csvLines
-set dateIndex to 0
-set paidOutIndex to 0
-set paidInIndex to 0
-if isCC then
-	set transIndex to 0
-	repeat with j from 1 to (count of headerItems)
-		set colName to item j of headerItems
-		if colName starts with "\"" and colName ends with "\"" then set colName to text 2 thru -2 of colName
-		if colName is "Date" then set dateIndex to j
-		if colName is "Transactions" then set transIndex to j
-		if colName is "Paid out" then set paidOutIndex to j
-		if colName is "Paid in" then set paidInIndex to j
-	end repeat
-else
-	set descIndex to 0
-	repeat with j from 1 to (count of headerItems)
-		set colName to item j of headerItems
-		if colName starts with "\"" and colName ends with "\"" then set colName to text 2 thru -2 of colName
-		if colName is "Date" then set dateIndex to j
-		if colName is "Description" then set descIndex to j
-		if colName is "Paid out" then set paidOutIndex to j
-		if colName is "Paid in" then set paidInIndex to j
-	end repeat
-end if
-set AppleScript's text item delimiters to oldDelims
-
-if dateIndex = 0 or paidOutIndex = 0 or paidInIndex = 0 or (isCC and transIndex = 0) or (not isCC and descIndex = 0) then
+set cols to parseHeaderColumns(item headerIndex of csvLines, isCC)
+if cols is false then
 	display alert "Missing one or more required columns in header." buttons {"OK"}
 	return
 end if
 
--- Process each data row following the header
 repeat with k from (headerIndex + 1) to (count of csvLines)
 	set csvLine to item k of csvLines
 	if csvLine is not "" then
-		-- Parse fields
 		set oldDelims to AppleScript's text item delimiters
 		set AppleScript's text item delimiters to ","
 		set parts to text items of csvLine
 		set AppleScript's text item delimiters to oldDelims
 
-		set dRaw to item dateIndex of parts
-		set pOutRaw to item paidOutIndex of parts
-		if isCC then
-			set commentRaw to item transIndex of parts
-			set commentSource to "Visa: "
-		else
-			set commentRaw to item descIndex of parts
-			set commentSource to "Flex: "
-		end if
-
-		set pOut to stripQuotes(pOutRaw)
+		set pOut to stripQuotes(item (paidOutIdx of cols) of parts)
 		set pOutNum to numericValue(pOut)
 
-		-- Only process rows where Paid out > 0
 		if pOutNum > 0 then
-			set dVal to stripQuotes(dRaw)
-			set parsedDate to date dVal
-			set parsedAmount to pOutNum
-			set defaultComment to commentSource & titleCase(stripQuotes(commentRaw))
+			set dVal to stripQuotes(item (dateIdx of cols) of parts)
+			set rawDesc to stripQuotes(item (descIdx of cols) of parts)
+			set defaultComment to (commentPrefix of cols) & titleCase(rawDesc)
 
-			-- Edit comment and decide whether to process
-			set poundSign to character id 163
-			set promptText to "Edit comment for transaction on " & dVal & " (" & poundSign & parsedAmount & "):"
-			set userInput to display dialog promptText default answer defaultComment buttons {"Cancel Script", "Skip", "Continue"} default button "Continue"
-			set skipAnswer to button returned of userInput
-			if skipAnswer is "Cancel Script" then
-				display dialog "Script cancelled by user." buttons {"OK"}
-				return
-			end if
-			if skipAnswer is "Continue" then
-				set theComment to text returned of userInput
-				if theComment is "" then set theComment to defaultComment
-				-- Category
-				set theCategory to choose from list {"Home", "Insurance", "Eats", "Transport & Travel", "Savings", "Family", "Projects & Pastimes", "Health & Beauty", "Clothes", "Big One-off", "Charitable & Other"} with prompt "Select Category for " & dVal & ":"
-				if theCategory is false then set theCategory to {""}
-				set theCategory to item 1 of theCategory
-
-				-- Append to Numbers and format
-				tell application "Numbers Creator Studio"
-					activate
-					set doc to front document
-					set tbl to table "Actuals" of sheet "Actual" of doc
-					tell tbl
-						make new row at end of rows
-						set newRow to last row
-						-- Wrap cell-setting in a try block to catch 'Can't set row' errors
-						try
-							tell newRow
-								set value of cell 1 to parsedDate
-								set value of cell 2 to theCategory
-								set value of cell 3 to parsedAmount
-								tell cell 3 to set format to currency
-								set value of cell 4 to theComment
-							end tell
-						on error errMsg number errNum
-							display alert "Numbers got an error: ensure Actuals table is not organised by Category while using this script" buttons {"OK"} as warning
-							return
-						end try
-					end tell
-				end tell
+			set txnResult to promptForTransaction(dVal, pOutNum, defaultComment)
+			if action of txnResult is "cancel" then return
+			if action of txnResult is "continue" then
+				set theComment to theComment of txnResult
+				set theCategory to selectCategory(dVal)
+				appendRowToNumbers(date dVal, theCategory, pOutNum, theComment)
 			end if
 		end if
 	end if
 end repeat
 
--- Notify when done processing all CSV records
 display dialog "All input CSV records have been read." buttons {"OK"}
+
+
+-- Handler: read CSV file, return {lines, isCC}
+on loadCSV(csvFile)
+	set csvContent to do shell script "cat " & quoted form of POSIX path of csvFile
+	set csvLines to paragraphs of csvContent
+	set isCC to false
+	if (item 1 of csvLines) contains "Select Credit Card" then set isCC to true
+	return {csvLines, isCC}
+end loadCSV
+
+-- Handler: find the header row index (returns 0 if not found)
+on findHeader(csvLines)
+	repeat with i from 1 to (count of csvLines)
+		set csvLine to item i of csvLines
+		if csvLine contains "\"Date\"" and csvLine contains "\"Paid out\"" and csvLine contains "\"Paid in\"" then
+			return i
+		end if
+	end repeat
+	return 0
+end findHeader
+
+-- Handler: parse column indices from header row
+-- Returns a record {dateIdx, paidOutIdx, descIdx, commentPrefix} or false if columns are missing
+on parseHeaderColumns(headerLine, isCC)
+	set oldDelims to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to ","
+	set headerItems to text items of headerLine
+	set AppleScript's text item delimiters to oldDelims
+
+	set dateIdx to 0
+	set paidOutIdx to 0
+	set descIdx to 0
+	set commentPrefix to ""
+
+	repeat with j from 1 to (count of headerItems)
+		set colName to item j of headerItems
+		if colName starts with "\"" and colName ends with "\"" then set colName to text 2 thru -2 of colName
+		if colName is "Date" then set dateIdx to j
+		if colName is "Paid out" then set paidOutIdx to j
+		if isCC and colName is "Transactions" then
+			set descIdx to j
+			set commentPrefix to "Visa: "
+		end if
+		if not isCC and colName is "Description" then
+			set descIdx to j
+			set commentPrefix to "Flex: "
+		end if
+	end repeat
+
+	if dateIdx = 0 or paidOutIdx = 0 or descIdx = 0 then return false
+	return {dateIdx:dateIdx, paidOutIdx:paidOutIdx, descIdx:descIdx, commentPrefix:commentPrefix}
+end parseHeaderColumns
+
+-- Handler: show dialog to edit comment; returns {action, theComment}
+-- action is "cancel", "skip", or "continue"
+on promptForTransaction(dVal, parsedAmount, defaultComment)
+	set poundSign to character id 163
+	set promptText to "Edit comment for transaction on " & dVal & " (" & poundSign & parsedAmount & "):"
+	set userInput to display dialog promptText default answer defaultComment buttons {"Cancel Script", "Skip", "Continue"} default button "Continue"
+	set btn to button returned of userInput
+	if btn is "Cancel Script" then
+		display dialog "Script cancelled by user." buttons {"OK"}
+		return {action:"cancel", theComment:""}
+	end if
+	if btn is "Skip" then return {action:"skip", theComment:""}
+	set theComment to text returned of userInput
+	if theComment is "" then set theComment to defaultComment
+	return {action:"continue", theComment:theComment}
+end promptForTransaction
+
+-- Handler: prompt user to pick a budget category
+on selectCategory(dVal)
+	set theCategory to choose from list {"Home", "Insurance", "Eats", "Transport & Travel", "Savings", "Family", "Projects & Pastimes", "Health & Beauty", "Clothes", "Big One-off", "Charitable & Other"} with prompt "Select Category for " & dVal & ":"
+	if theCategory is false then return ""
+	return item 1 of theCategory
+end selectCategory
+
+-- Handler: append one row to the Actuals table in Numbers
+on appendRowToNumbers(parsedDate, theCategory, parsedAmount, theComment)
+	tell application "Numbers Creator Studio"
+		activate
+		set doc to front document
+		set tbl to table "Actuals" of sheet "Actual" of doc
+		tell tbl
+			make new row at end of rows
+			set newRow to last row
+			try
+				tell newRow
+					set value of cell 1 to parsedDate
+					set value of cell 2 to theCategory
+					set value of cell 3 to parsedAmount
+					tell cell 3 to set format to currency
+					set value of cell 4 to theComment
+				end tell
+			on error
+				display alert "Numbers got an error: ensure Actuals table is not organised by Category while using this script" buttons {"OK"} as warning
+			end try
+		end tell
+	end tell
+end appendRowToNumbers
+
 
 -- Handler: strip surrounding quotes
 on stripQuotes(s)
@@ -154,13 +158,11 @@ end stripQuotes
 on numericValue(s)
 	try
 		set t to s
-		-- Strip leading non-digit characters (currency symbols regardless of encoding)
 		repeat while length of t > 0
 			if text 1 of t is in "0123456789" then exit repeat
 			set t to text 2 thru -1 of t
 		end repeat
 		if t is "" then return 0
-		-- Remove comma thousands separators
 		set AppleScript's text item delimiters to ","
 		set parts to text items of t
 		set AppleScript's text item delimiters to ""
@@ -171,17 +173,17 @@ on numericValue(s)
 	end try
 end numericValue
 
--- Uppercasing via awk
+-- Handler: uppercasing via awk
 on makeUpper2(inString)
 	return do shell script "awk '{ print toupper($0) }' <<< " & quoted form of inString
 end makeUpper2
 
--- Lowercasing via awk
+-- Handler: lowercasing via awk
 on makeLower2(inString)
 	return do shell script "awk '{ print tolower($0) }' <<< " & quoted form of inString
 end makeLower2
 
--- Title-case each word and preserve spaces
+-- Handler: title-case each word
 on titleCase(inputText)
 	set wordList to words of inputText
 	set newList to {}
@@ -189,17 +191,11 @@ on titleCase(inputText)
 		set w to w as text
 		if length of w > 0 then
 			set firstLetter to text 1 thru 1 of w
-			if length of w > 1 then
-				set restLetters to text 2 thru -1 of w
-			else
-				set restLetters to ""
-			end if
-			set firstUpper to my makeUpper2(firstLetter)
-			set restLower to my makeLower2(restLetters)
-			set end of newList to firstUpper & restLower
+			set restLetters to ""
+			if length of w > 1 then set restLetters to text 2 thru -1 of w
+			set end of newList to my makeUpper2(firstLetter) & my makeLower2(restLetters)
 		end if
 	end repeat
-	-- Join list items with a single space
 	set oldDelims to AppleScript's text item delimiters
 	set AppleScript's text item delimiters to " "
 	set resultText to newList as text
