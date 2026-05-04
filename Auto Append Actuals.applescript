@@ -43,9 +43,9 @@ repeat with csvPath in csvPaths
 		if cols is false then
 			display alert "Required columns missing; skipping: " & csvPath buttons {"OK"}
 		else
-			set result to processCSV(csvLines, headerIndex, cols, processedFPs, wordLists, categories, accumulatedFPs)
-			set wasCancelled to item 1 of result
-			set accumulatedFPs to item 2 of result
+			set csvResult to processCSV(csvLines, headerIndex, cols, processedFPs, wordLists, categories, accumulatedFPs)
+			set wasCancelled to item 1 of csvResult
+			set accumulatedFPs to item 2 of csvResult
 			if wasCancelled then
 				-- Save progress so far, leave this CSV in Downloads for re-run
 				exit repeat
@@ -65,7 +65,7 @@ appendToProcessed(processedFilePath, accumulatedFPs)
 
 set archivedCount to count of csvFullyProcessed
 set newTxnCount to count of accumulatedFPs
-display dialog newTxnCount & " new transaction(s) added. " & archivedCount & " CSV file(s) archived." buttons {"OK"}
+display dialog (newTxnCount as text) & " new transaction(s) added. " & (archivedCount as text) & " CSV file(s) archived." buttons {"OK"}
 
 
 -- ── Handlers ──────────────────────────────────────────────────────────────────
@@ -75,10 +75,12 @@ on loadProcessed(filePath)
 	try
 		set content to do shell script "cat " & quoted form of filePath
 		if content is "" then return {}
-		set oldDelims to AppleScript's text item delimiters
-		set AppleScript's text item delimiters to linefeed
-		set fps to text items of content
-		set AppleScript's text item delimiters to oldDelims
+		set rawFPs to paragraphs of content
+		set fps to {}
+		repeat with fp in rawFPs
+			set fp to fp as text
+			if fp is not "" then set end of fps to fp
+		end repeat
 		return fps
 	on error
 		return {}
@@ -90,11 +92,14 @@ on findCSVFiles(dir)
 	try
 		set listing to do shell script "find " & quoted form of dir & " -maxdepth 1 -name 'Statement Download*.csv' 2>/dev/null"
 		if listing is "" then return {}
-		set oldDelims to AppleScript's text item delimiters
-		set AppleScript's text item delimiters to linefeed
-		set paths to text items of listing
-		set AppleScript's text item delimiters to oldDelims
-		return paths
+		-- 'paragraphs' handles \r, \n and \r\n — do shell script returns \r-separated lines
+		set rawPaths to paragraphs of listing
+		set cleanPaths to {}
+		repeat with p in rawPaths
+			set p to p as text
+			if p is not "" then set end of cleanPaths to p
+		end repeat
+		return cleanPaths
 	on error
 		return {}
 	end try
@@ -257,7 +262,8 @@ on findBestCategory(wordLists, categories, rawDesc)
 	set bestCat to ""
 	repeat with i from 1 to (count of categories)
 		set s to my wordOverlap(descWords, item i of wordLists)
-		if s > bestScore then
+		-- >= so the most recent row (highest index) wins ties, giving updated categories priority
+		if s >= bestScore then
 			set bestScore to s
 			set bestCat to item i of categories
 		end if
@@ -269,13 +275,13 @@ end findBestCategory
 on significantWords(str)
 	set upperStr to do shell script "echo " & quoted form of str & " | tr '[:lower:]' '[:upper:]'"
 	set allWords to words of upperStr
-	set result to {}
+	set sigWords to {}
 	repeat with w in allWords
 		set w to w as text
 		-- Short words (GB, UK, etc.) and two-letter abbreviations are excluded as noise
-		if length of w >= 4 then set end of result to w
+		if length of w >= 4 then set end of sigWords to w
 	end repeat
-	return result
+	return sigWords
 end significantWords
 
 -- Count how many words from listA appear in listB
@@ -294,19 +300,19 @@ on promptForCategory(dVal, amount, suggestedCat, theComment)
 	set categoryList to {"Home", "Insurance", "Eats", "Transport & Travel", "Savings", "Family", "Projects & Pastimes", "Health & Beauty", "Clothes", "Big One-off", "Charitable & Other"}
 
 	if suggestedCat is not "" then
-		-- Offer the best guess; user can accept with one click or override
+		-- Offer the best guess; Accept = one click done, Pick… = full list, Cancel Script = stop
 		set promptMsg to theComment & " — " & poundSign & amount & " on " & dVal & return & "Suggested: " & suggestedCat
-		set btn to button returned of (display dialog promptMsg buttons {"Cancel Script", "Skip", "Pick other…", "Accept"} default button "Accept")
+		set btn to button returned of (display dialog promptMsg buttons {"Cancel Script", "Pick…", "Accept"} default button "Accept")
 		if btn is "Cancel Script" then
 			display dialog "Script cancelled." buttons {"OK"}
 			return false
 		end if
-		if btn is "Skip" then return ""
 		if btn is "Accept" then return suggestedCat
-		-- "Pick other…" falls through to the full category list below
+		-- "Pick…" falls through to the full category list below
 	end if
 
-	-- No suggestion, or user chose "Pick other…": show the full picker
+	-- No suggestion, or user chose "Pick…": show the full picker
+	-- Dismissing the picker (Cancel) counts as Skip for this transaction
 	set picked to choose from list categoryList with prompt "Category for " & theComment & " (" & poundSign & amount & ") on " & dVal & ":"
 	if picked is false then return ""
 	return item 1 of picked
