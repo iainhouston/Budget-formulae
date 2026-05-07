@@ -8,6 +8,7 @@ use AppleScript version "2.4"
 
 property storeDir : "/Users/iainhouston/Documents/Money/ActualsStore"
 property processedFilePath : "/Users/iainhouston/Documents/Money/ActualsStore/processed.txt"
+property greylistPath : "/Users/iainhouston/Documents/Money/ActualsStore/greylist.txt"
 property downloadsDir : "/Users/iainhouston/Downloads"
 property numberDocPath : "/Users/iainhouston/Library/Mobile Documents/com~apple~Numbers/Documents/Budget 2026.numbers"
 property confidenceThreshold : 2 -- minimum significant-word overlap for silent auto-assign
@@ -17,6 +18,9 @@ do shell script "mkdir -p " & quoted form of storeDir
 
 -- Load fingerprints of all previously processed transactions
 set processedFPs to loadProcessed(processedFilePath)
+
+-- Load greylist terms (transactions that must always go to the UI regardless of match confidence)
+set greylist to loadGreylist(greylistPath)
 
 -- Find all Statement Download CSV files currently in Downloads
 set csvPaths to findCSVFiles(downloadsDir)
@@ -43,7 +47,7 @@ repeat with csvPath in csvPaths
 		if cols is false then
 			display alert "Required columns missing; skipping: " & csvPath buttons {"OK"}
 		else
-			set csvResult to processCSV(csvLines, headerIndex, cols, processedFPs, wordLists, categories, accumulatedFPs)
+			set csvResult to processCSV(csvLines, headerIndex, cols, processedFPs, wordLists, categories, accumulatedFPs, greylist)
 			set wasCancelled to item 1 of csvResult
 			set accumulatedFPs to item 2 of csvResult
 			if wasCancelled then
@@ -200,7 +204,7 @@ end readActualsData
 -- Returns {wasCancelled, updatedFPs}. wasCancelled is true if the user clicked Cancel Script.
 -- Fingerprints are recorded for both accepted and skipped transactions so they are
 -- not re-presented on future runs; only fully cancelled transactions are left unrecorded.
-on processCSV(csvLines, headerIndex, cols, processedFPs, wordLists, categories, newFPs)
+on processCSV(csvLines, headerIndex, cols, processedFPs, wordLists, categories, newFPs, greylist)
 	repeat with k from (headerIndex + 1) to (count of csvLines)
 		set csvLine to item k of csvLines
 		if csvLine is not "" then
@@ -228,12 +232,15 @@ on processCSV(csvLines, headerIndex, cols, processedFPs, wordLists, categories, 
 					set bestCat to item 1 of matchResult
 					set bestScore to item 2 of matchResult
 
-					if bestScore >= confidenceThreshold then
-						-- Confident match: silently assign and record
+					-- Greylisted transactions always go to the UI regardless of match confidence
+					set forcePrompt to my isOnGreylist(theComment, greylist)
+
+					if bestScore >= confidenceThreshold and not forcePrompt then
+						-- Confident match, not greylisted: silently assign and record
 						my appendRowToNumbers(date dVal, bestCat, pOutNum, theComment)
 						set end of newFPs to fp
 					else
-						-- Uncertain match: ask the user; they can accept, pick, skip, or cancel
+						-- Uncertain or greylisted: ask the user
 						set userChoice to my promptForCategory(dVal, pOutNum, bestCat, theComment)
 						if userChoice is false then
 							-- User cancelled the entire script; return with FPs saved so far
@@ -293,27 +300,32 @@ on wordOverlap(listA, listB)
 	return score
 end wordOverlap
 
--- Present a category prompt when automatic matching is uncertain.
+-- Present a category prompt when automatic matching is uncertain or the transaction is greylisted.
 -- Returns: chosen category string | "" (skip, record FP) | false (cancel whole script)
+-- Buttons: Cancel Script | Skip | Accept… (Accept… opens the picker pre-selected to the suggestion)
 on promptForCategory(dVal, amount, suggestedCat, theComment)
 	set poundSign to character id 163
 	set categoryList to {"Home", "Insurance", "Eats", "Transport & Travel", "Savings", "Family", "Projects & Pastimes", "Health & Beauty", "Clothes", "Big One-off", "Charitable & Other"}
 
-	if suggestedCat is not "" then
-		-- Offer the best guess; Accept = one click done, Pick… = full list, Cancel Script = stop
-		set promptMsg to theComment & " — " & poundSign & amount & " on " & dVal & return & "Suggested: " & suggestedCat
-		set btn to button returned of (display dialog promptMsg buttons {"Cancel Script", "Pick…", "Accept"} default button "Accept")
-		if btn is "Cancel Script" then
-			display dialog "Script cancelled." buttons {"OK"}
-			return false
-		end if
-		if btn is "Accept" then return suggestedCat
-		-- "Pick…" falls through to the full category list below
-	end if
+	-- Build the prompt; include the suggestion when one exists
+	set promptMsg to theComment & " — " & poundSign & amount & " on " & dVal
+	if suggestedCat is not "" then set promptMsg to promptMsg & return & "Suggested: " & suggestedCat
 
-	-- No suggestion, or user chose "Pick…": show the full picker
-	-- Dismissing the picker (Cancel) counts as Skip for this transaction
-	set picked to choose from list categoryList with prompt "Category for " & theComment & " (" & poundSign & amount & ") on " & dVal & ":"
+	set btn to button returned of (display dialog promptMsg buttons {"Cancel Script", "Skip", "Accept…"} default button "Accept…")
+	if btn is "Cancel Script" then
+		display dialog "Script cancelled." buttons {"OK"}
+		return false
+	end if
+	-- Skip: record the fingerprint so this transaction is not re-presented, but don't add to Actuals
+	if btn is "Skip" then return ""
+
+	-- Accept…: open the category picker pre-selected to the suggestion (user can confirm or change)
+	if suggestedCat is not "" then
+		set picked to choose from list categoryList with prompt "Confirm or change category for " & dVal & ":" default items {suggestedCat}
+	else
+		set picked to choose from list categoryList with prompt "Category for " & theComment & " (" & poundSign & amount & ") on " & dVal & ":"
+	end if
+	-- Dismissing the picker also counts as Skip
 	if picked is false then return ""
 	return item 1 of picked
 end promptForCategory
@@ -352,6 +364,35 @@ on appendToProcessed(filePath, newFPs)
 		do shell script "printf '%s\n' " & quoted form of (fp as text) & " >> " & quoted form of filePath
 	end repeat
 end appendToProcessed
+
+-- Load greylist.txt and return a list of uppercased match terms
+on loadGreylist(filePath)
+	try
+		set content to do shell script "cat " & quoted form of filePath
+		if content is "" then return {}
+		set rawTerms to paragraphs of content
+		set greylist to {}
+		repeat with t in rawTerms
+			set t to t as text
+			if t is not "" then
+				set end of greylist to do shell script "echo " & quoted form of t & " | tr '[:lower:]' '[:upper:]'"
+			end if
+		end repeat
+		return greylist
+	on error
+		return {}
+	end try
+end loadGreylist
+
+-- Return true if theComment contains any greylist term (case-insensitive substring match)
+on isOnGreylist(theComment, greylist)
+	if (count of greylist) = 0 then return false
+	set upperComment to do shell script "echo " & quoted form of theComment & " | tr '[:lower:]' '[:upper:]'"
+	repeat with term in greylist
+		if upperComment contains (term as text) then return true
+	end repeat
+	return false
+end isOnGreylist
 
 -- Remove a single layer of enclosing double-quote characters if present
 on stripQuotes(s)
