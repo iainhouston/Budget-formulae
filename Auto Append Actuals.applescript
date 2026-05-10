@@ -7,10 +7,10 @@ use AppleScript version "2.4"
 -- and appends new paid-out transactions to Numbers.
 
 property storeDir : "/Users/iainhouston/Documents/Money/ActualsStore"
+property currentSpreadsheetFile : "/Users/iainhouston/Documents/Money/ActualsStore/CurrentSpreadsheet.txt"
 property processedFilePath : "/Users/iainhouston/Documents/Money/ActualsStore/processed.txt"
 property greylistPath : "/Users/iainhouston/Documents/Money/ActualsStore/greylist.txt"
 property downloadsDir : "/Users/iainhouston/Downloads"
-property numberDocPath : "/Users/iainhouston/Library/Mobile Documents/com~apple~Numbers/Documents/Budget 2026.numbers"
 property confidenceThreshold : 2 -- minimum significant-word overlap for silent auto-assign
 
 -- Guarantee the store directory exists
@@ -29,8 +29,9 @@ if (count of csvPaths) = 0 then
 	return
 end if
 
--- Open Budget 2026 in Numbers (if not already open) and read the Actuals history
-ensureNumbersOpen(numberDocPath)
+-- Open the budget spreadsheet from CurrentSpreadsheet.txt and read the Actuals history
+set budgetDocPath to loadSpreadsheetPath(currentSpreadsheetFile)
+ensureNumbersOpen(budgetDocPath)
 set {wordLists, categories} to readActualsData()
 
 -- Process each CSV in sequence, accumulating new fingerprints
@@ -157,22 +158,50 @@ on parseHeaderColumns(headerLine, isCC)
 	return {dateIdx:dateIdx, paidOutIdx:paidOutIdx, descIdx:descIdx, commentPrefix:commentPrefix}
 end parseHeaderColumns
 
--- Open Budget 2026 in Numbers if it is not already open, then bring it to front
+-- Open the budget spreadsheet in Numbers if it is not already open, then bring it to front
 on ensureNumbersOpen(docPath)
 	tell application "Numbers Creator Studio"
 		set docIsOpen to false
 		try
 			repeat with d in documents
-				if name of d is "Budget 2026" or name of d is "Budget 2026.numbers" then
-					set docIsOpen to true
-					exit repeat
-				end if
+				try
+					if (POSIX path of (path of d)) is docPath then
+						set docIsOpen to true
+						exit repeat
+					end if
+				end try
 			end repeat
 		end try
 		if not docIsOpen then open POSIX file docPath
 		activate
 	end tell
 end ensureNumbersOpen
+
+-- Read the budget spreadsheet path from the CurrentSpreadsheet file
+on loadSpreadsheetPath(pathFile)
+	try
+		set fileContent to do shell script "tr -d '\\r' < " & quoted form of pathFile & " | tr -d '\\n'"
+		set fileContent to my trim(fileContent)
+		if fileContent is "" then error "CurrentSpreadsheet.txt is empty"
+		return fileContent
+	on error errMsg number errNum
+		display alert "Unable to read spreadsheet path from " & pathFile buttons {"OK"}
+		error number errNum
+	end try
+end loadSpreadsheetPath
+
+on trim(str)
+	set oldDelims to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to {space, tab, linefeed, return}
+	repeat while str starts with space or str starts with tab or str starts with linefeed or str starts with return
+		set str to text 2 thru -1 of str
+	end repeat
+	repeat while str ends with space or str ends with tab or str ends with linefeed or str ends with return
+		set str to text 1 thru -2 of str
+	end repeat
+	set AppleScript's text item delimiters to oldDelims
+	return str
+end trim
 
 -- Read every Actuals row and return two parallel lists:
 --   wordLists  — significant uppercased words precomputed for each comment
