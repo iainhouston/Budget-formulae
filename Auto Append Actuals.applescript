@@ -348,9 +348,12 @@ on promptForCategory(dVal, amount, suggestedCat, theComment)
 	-- Skip: record the fingerprint so this transaction is not re-presented, but don't add to Actuals
 	if btn is "Skip" then return ""
 
-	-- Accept…: open the category picker pre-selected to the suggestion (user can confirm or change)
+	-- Accept…: if a suggestion exists, let the user confirm it directly or open the picker
 	if suggestedCat is not "" then
-		set picked to choose from list categoryList with prompt "Confirm or change category for " & dVal & ":" default items {suggestedCat}
+		set btn2 to button returned of (display dialog "Accept suggested category?" & return & return & suggestedCat buttons {"Choose Different…", "Accept"} default button "Accept")
+		if btn2 is "Accept" then return suggestedCat
+		-- "Choose Different…": fall through to the picker pre-selected to the suggestion
+		set picked to choose from list categoryList with prompt "Choose category for " & dVal & ":" default items {suggestedCat}
 	else
 		set picked to choose from list categoryList with prompt "Category for " & theComment & " (" & poundSign & amount & ") on " & dVal & ":"
 	end if
